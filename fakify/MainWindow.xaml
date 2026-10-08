@@ -1,18 +1,14 @@
-﻿<Window
+<Window x:Class="FakeifyCSharp.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d" x:Class="FakeifyCSharp.MainWindow"
-        Title="fakeify music" Height="800" Width="1260" MinHeight="640" MinWidth="1000"
+        Title="Fakeify" Height="800" Width="1260" MinHeight="640" MinWidth="1000"
         FontFamily="Segoe UI" FontSize="13" Foreground="#0E3A5C"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         WindowStartupLocation="CenterScreen"
-        PreviewKeyDown="Window_PreviewKeyDown">
+        PreviewKeyDown="Window_PreviewKeyDown"
+        AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop">
 
     <Window.Resources>
-
-        <!-- =====================================================================
-             STYLES
-             ===================================================================== -->
 
         <!-- =====================================================================
              PALETTE  (Frutiger Aero: sky blue, aqua, grass green, glossy glass)
@@ -125,20 +121,24 @@
         <DropShadowEffect x:Key="FocusGlow" Color="#1FA2EA" Opacity="0.7" BlurRadius="12" ShadowDepth="0"/>
         <DropShadowEffect x:Key="OrbGlow" Color="#3FD21E" Opacity="0.75" BlurRadius="18" ShadowDepth="0"/>
 
+        <!-- =====================================================================
+             STYLES
+             ===================================================================== -->
+
         <!-- Icon font text (Segoe Fluent Icons on Win11, Segoe MDL2 Assets on Win10) -->
-        <Style x:Key="Glyph" TargetType="{x:Type TextBlock}">
+        <Style x:Key="Glyph" TargetType="TextBlock">
             <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
             <Setter Property="FontSize" Value="16"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
         <!-- Glass panel: translucent body + curved gloss on the top half -->
-        <Style x:Key="GlassPanel" TargetType="{x:Type ContentControl}">
+        <Style x:Key="GlassPanel" TargetType="ContentControl">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="IsTabStop" Value="False"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type ContentControl}">
+                    <ControlTemplate TargetType="ContentControl">
                         <Grid>
                             <Border CornerRadius="20" Background="{StaticResource GlassFill}"
                                     BorderBrush="{StaticResource GlassEdge}" BorderThickness="1.5"
@@ -158,7 +158,7 @@
         </Style>
 
         <!-- Glossy pill button (blue) -->
-        <Style x:Key="GlassButton" TargetType="{x:Type Button}">
+        <Style x:Key="GlassButton" TargetType="Button">
             <Setter Property="Background" Value="{StaticResource BlueFill}"/>
             <Setter Property="BorderBrush" Value="#9908476F"/>
             <Setter Property="Foreground" Value="White"/>
@@ -168,7 +168,7 @@
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Button}">
+                    <ControlTemplate TargetType="Button">
                         <Grid x:Name="Root" RenderTransformOrigin="0.5,0.5">
                             <Border CornerRadius="15" Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
@@ -193,9 +193,7 @@
                                 <Setter TargetName="Hover" Property="Background" Value="#33000000"/>
                                 <Setter TargetName="Hover" Property="Opacity" Value="1"/>
                                 <Setter TargetName="Root" Property="RenderTransform">
-                                    <Setter.Value>
-                                        <ScaleTransform ScaleX="0.97" ScaleY="0.97"/>
-                                    </Setter.Value>
+                                    <Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value>
                                 </Setter>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
@@ -207,18 +205,18 @@
             </Setter>
         </Style>
 
-        <Style x:Key="AccentButton" TargetType="{x:Type Button}" BasedOn="{StaticResource GlassButton}">
+        <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource GlassButton}">
             <Setter Property="Background" Value="{StaticResource GreenFill}"/>
             <Setter Property="BorderBrush" Value="#99236B10"/>
         </Style>
 
-        <Style x:Key="DangerButton" TargetType="{x:Type Button}" BasedOn="{StaticResource GlassButton}">
+        <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource GlassButton}">
             <Setter Property="Background" Value="{StaticResource RedFill}"/>
             <Setter Property="BorderBrush" Value="#99822010"/>
         </Style>
 
         <!-- Sidebar navigation item -->
-        <Style x:Key="NavButton" TargetType="{x:Type Button}">
+        <Style x:Key="NavButton" TargetType="Button">
             <Setter Property="Foreground" Value="{StaticResource Ink}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="12,9"/>
@@ -228,7 +226,7 @@
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Button}">
+                    <ControlTemplate TargetType="Button">
                         <Border x:Name="Bd" CornerRadius="12" Background="Transparent"
                                 BorderBrush="Transparent" BorderThickness="1" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
@@ -242,6 +240,10 @@
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource NavActiveFill}"/>
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="#CCFFFFFF"/>
                             </Trigger>
+                            <Trigger Property="Tag" Value="drop">
+                                <Setter TargetName="Bd" Property="Background" Value="#80A6EE6B"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#FF3DAE1B"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -249,7 +251,7 @@
         </Style>
 
         <!-- Round glass icon button (row actions + transport) -->
-        <Style x:Key="IconButton" TargetType="{x:Type Button}">
+        <Style x:Key="IconButton" TargetType="Button">
             <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Foreground" Value="#0B6FB8"/>
@@ -259,7 +261,7 @@
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Button}">
+                    <ControlTemplate TargetType="Button">
                         <Grid x:Name="Root" RenderTransformOrigin="0.5,0.5">
                             <Ellipse Fill="{StaticResource WhiteGlass}" Stroke="#8FB9D6" StrokeThickness="1"/>
                             <Grid IsHitTestVisible="False">
@@ -278,9 +280,7 @@
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Root" Property="RenderTransform">
-                                    <Setter.Value>
-                                        <ScaleTransform ScaleX="0.92" ScaleY="0.92"/>
-                                    </Setter.Value>
+                                    <Setter.Value><ScaleTransform ScaleX="0.92" ScaleY="0.92"/></Setter.Value>
                                 </Setter>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
@@ -292,12 +292,12 @@
             </Setter>
         </Style>
 
-        <Style x:Key="DangerIconButton" TargetType="{x:Type Button}" BasedOn="{StaticResource IconButton}">
+        <Style x:Key="DangerIconButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
             <Setter Property="Foreground" Value="#D03A22"/>
         </Style>
 
         <!-- Big glowing play orb -->
-        <Style x:Key="PlayOrb" TargetType="{x:Type Button}">
+        <Style x:Key="PlayOrb" TargetType="Button">
             <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
             <Setter Property="FontSize" Value="22"/>
             <Setter Property="Foreground" Value="White"/>
@@ -308,7 +308,7 @@
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Button}">
+                    <ControlTemplate TargetType="Button">
                         <Grid x:Name="Root" RenderTransformOrigin="0.5,0.5">
                             <Ellipse Fill="{TemplateBinding Background}" Stroke="#99236B10" StrokeThickness="1.2"
                                      Effect="{StaticResource OrbGlow}"/>
@@ -329,9 +329,7 @@
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Root" Property="RenderTransform">
-                                    <Setter.Value>
-                                        <ScaleTransform ScaleX="0.94" ScaleY="0.94"/>
-                                    </Setter.Value>
+                                    <Setter.Value><ScaleTransform ScaleX="0.94" ScaleY="0.94"/></Setter.Value>
                                 </Setter>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -341,7 +339,7 @@
         </Style>
 
         <!-- Pill text box with placeholder (set the Tag property to the placeholder text) -->
-        <Style x:Key="GlassTextBox" TargetType="{x:Type TextBox}">
+        <Style x:Key="GlassTextBox" TargetType="TextBox">
             <Setter Property="Foreground" Value="{StaticResource Ink}"/>
             <Setter Property="CaretBrush" Value="{StaticResource Ink}"/>
             <Setter Property="SelectionBrush" Value="#5FB8F0"/>
@@ -350,7 +348,7 @@
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type TextBox}">
+                    <ControlTemplate TargetType="TextBox">
                         <Grid>
                             <Border x:Name="Bd" CornerRadius="19" Background="#D4FFFFFF"
                                     BorderBrush="#7FB3D6" BorderThickness="1"/>
@@ -378,24 +376,24 @@
         </Style>
 
         <!-- Slider pieces -->
-        <Style x:Key="InvisibleRepeat" TargetType="{x:Type RepeatButton}">
+        <Style x:Key="InvisibleRepeat" TargetType="RepeatButton">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="IsTabStop" Value="False"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type RepeatButton}">
+                    <ControlTemplate TargetType="RepeatButton">
                         <Border Background="Transparent"/>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
 
-        <Style x:Key="SliderFillRepeat" TargetType="{x:Type RepeatButton}">
+        <Style x:Key="SliderFillRepeat" TargetType="RepeatButton">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="IsTabStop" Value="False"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type RepeatButton}">
+                    <ControlTemplate TargetType="RepeatButton">
                         <Grid Background="Transparent">
                             <Border Height="8" CornerRadius="4" Background="{StaticResource GreenFill}"
                                     BorderBrush="#802A7D12" BorderThickness="1" VerticalAlignment="Center"/>
@@ -405,12 +403,12 @@
             </Setter>
         </Style>
 
-        <Style x:Key="OrbThumb" TargetType="{x:Type Thumb}">
+        <Style x:Key="OrbThumb" TargetType="Thumb">
             <Setter Property="Width" Value="22"/>
             <Setter Property="Height" Value="22"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Thumb}">
+                    <ControlTemplate TargetType="Thumb">
                         <Grid>
                             <Ellipse Fill="{StaticResource WhiteGlass}" Stroke="#8A0B4F7D" StrokeThickness="1"
                                      Effect="{StaticResource BtnShadow}"/>
@@ -422,12 +420,12 @@
             </Setter>
         </Style>
 
-        <Style x:Key="AeroSlider" TargetType="{x:Type Slider}">
+        <Style x:Key="AeroSlider" TargetType="Slider">
             <Setter Property="IsMoveToPointEnabled" Value="True"/>
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Slider}">
+                    <ControlTemplate TargetType="Slider">
                         <Grid Height="24" Background="Transparent">
                             <Border Height="8" CornerRadius="4" Background="{StaticResource TrackFill}"
                                     BorderBrush="#99FFFFFF" BorderThickness="1" VerticalAlignment="Center"/>
@@ -449,11 +447,11 @@
         </Style>
 
         <!-- Thin glossy progress bar -->
-        <Style x:Key="AeroProgress" TargetType="{x:Type ProgressBar}">
+        <Style x:Key="AeroProgress" TargetType="ProgressBar">
             <Setter Property="Height" Value="8"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type ProgressBar}">
+                    <ControlTemplate TargetType="ProgressBar">
                         <Grid>
                             <Border x:Name="PART_Track" CornerRadius="4" Background="{StaticResource TrackFill}"
                                     BorderBrush="#99FFFFFF" BorderThickness="1"/>
@@ -466,10 +464,10 @@
         </Style>
 
         <!-- Scrollbar (vertical) -->
-        <Style x:Key="ScrollThumbStyle" TargetType="{x:Type Thumb}">
+        <Style x:Key="ScrollThumbStyle" TargetType="Thumb">
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Thumb}">
+                    <ControlTemplate TargetType="Thumb">
                         <Border Margin="2,0" CornerRadius="5" Background="{StaticResource ScrollThumbFill}"
                                 BorderBrush="#99FFFFFF" BorderThickness="1"/>
                     </ControlTemplate>
@@ -477,11 +475,11 @@
             </Setter>
         </Style>
 
-        <Style TargetType="{x:Type ScrollBar}">
+        <Style TargetType="ScrollBar">
             <Setter Property="Width" Value="12"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type ScrollBar}">
+                    <ControlTemplate TargetType="ScrollBar">
                         <Grid Background="Transparent">
                             <Border CornerRadius="5" Margin="2,0" Background="#26FFFFFF"/>
                             <Track x:Name="PART_Track" IsDirectionReversed="True">
@@ -501,8 +499,75 @@
             </Setter>
         </Style>
 
+        <!-- Themed popup menu (used by "Add to playlist") -->
+        <LinearGradientBrush x:Key="MenuFill" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#FBFFFFFF" Offset="0"/>
+            <GradientStop Color="#F0E4F4FF" Offset="1"/>
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="DialogBase" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#FFF4FBFF" Offset="0"/>
+            <GradientStop Color="#FFCBE9F9" Offset="1"/>
+        </LinearGradientBrush>
+
+        <Style x:Key="AeroMenuItem" TargetType="MenuItem">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Padding" Value="8,8"/>
+            <Setter Property="Margin" Value="0,1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Bd" CornerRadius="11" Background="Transparent"
+                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter ContentSource="Icon" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center"
+                                                  RecognizesAccessKey="False" Margin="0,0,10,0"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource BlueFill}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource InkSoft}"/>
+                                <Setter Property="Opacity" Value="0.65"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="AeroContextMenu" TargetType="ContextMenu">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="HasDropShadow" Value="False"/>
+            <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="MinWidth" Value="210"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Margin="10,4,10,14" Padding="6" CornerRadius="16"
+                                Background="{StaticResource MenuFill}" BorderBrush="#8FC4E6" BorderThickness="1.5"
+                                Effect="{StaticResource SoftShadow}">
+                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Song row: highlights on hover and while playing -->
-        <Style x:Key="TrackRow" TargetType="{x:Type Border}">
+        <Style x:Key="TrackRow" TargetType="Border">
             <Setter Property="Background" Value="{StaticResource RowFill}"/>
             <Setter Property="BorderBrush" Value="#99FFFFFF"/>
             <Setter Property="BorderThickness" Value="1"/>
@@ -569,29 +634,19 @@
 
             <!-- bubbles -->
             <Ellipse Width="190" Height="190" Fill="{StaticResource BubbleBrush}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="330,70,0,0">
-                <Ellipse.RenderTransform>
-                    <TranslateTransform x:Name="B1T"/>
-                </Ellipse.RenderTransform>
+                <Ellipse.RenderTransform><TranslateTransform x:Name="B1T"/></Ellipse.RenderTransform>
             </Ellipse>
             <Ellipse Width="120" Height="120" Fill="{StaticResource BubbleBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,120,120,0">
-                <Ellipse.RenderTransform>
-                    <TranslateTransform x:Name="B2T"/>
-                </Ellipse.RenderTransform>
+                <Ellipse.RenderTransform><TranslateTransform x:Name="B2T"/></Ellipse.RenderTransform>
             </Ellipse>
             <Ellipse Width="80" Height="80" Fill="{StaticResource BubbleBrush}" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="90,0,0,170">
-                <Ellipse.RenderTransform>
-                    <TranslateTransform x:Name="B3T"/>
-                </Ellipse.RenderTransform>
+                <Ellipse.RenderTransform><TranslateTransform x:Name="B3T"/></Ellipse.RenderTransform>
             </Ellipse>
             <Ellipse Width="230" Height="230" Fill="{StaticResource BubbleBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,260,60">
-                <Ellipse.RenderTransform>
-                    <TranslateTransform x:Name="B4T"/>
-                </Ellipse.RenderTransform>
+                <Ellipse.RenderTransform><TranslateTransform x:Name="B4T"/></Ellipse.RenderTransform>
             </Ellipse>
             <Ellipse Width="60" Height="60" Fill="{StaticResource BubbleBrush}" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,40,0,0">
-                <Ellipse.RenderTransform>
-                    <TranslateTransform x:Name="B5T"/>
-                </Ellipse.RenderTransform>
+                <Ellipse.RenderTransform><TranslateTransform x:Name="B5T"/></Ellipse.RenderTransform>
             </Ellipse>
         </Grid>
 
@@ -618,7 +673,7 @@
                             <TextBlock Style="{StaticResource Glyph}" Text="&#xE8D6;" Foreground="White" FontSize="18"
                                        HorizontalAlignment="Center" Margin="0,4,0,0"/>
                         </Grid>
-                        <TextBlock Text="fakeify music" FontSize="24" FontWeight="Bold" Margin="10,0,0,0" VerticalAlignment="Center"
+                        <TextBlock Text="Fakeify" FontSize="27" FontWeight="Bold" Margin="10,0,0,0" VerticalAlignment="Center"
                                    Foreground="{StaticResource TitleBrush}">
                             <TextBlock.Effect>
                                 <DropShadowEffect Color="White" BlurRadius="8" ShadowDepth="0" Opacity="0.95"/>
@@ -661,6 +716,13 @@
                         <Button Style="{StaticResource IconButton}" Content="&#xE710;" ToolTip="New playlist"
                                 Width="28" Height="28" HorizontalAlignment="Right" Click="CreatePlaylist_Click"/>
                     </Grid>
+
+                    <Button DockPanel.Dock="Bottom" Style="{StaticResource NavButton}" Click="Settings_Click" Margin="0,8,0,0" ToolTip="Change where Fakeify saves your music">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE713;" Width="28"/>
+                            <TextBlock Text="Settings" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
 
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,4,0,0">
                         <StackPanel x:Name="PlaylistsPanel"/>
@@ -707,26 +769,29 @@
                     <!-- Header & local filter -->
                     <Grid Grid.Row="1" Margin="0,0,6,10">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                            <TextBlock x:Name="LblViewHeader" Text="Local Library" FontSize="26" FontWeight="Bold" Foreground="{StaticResource Ink}">
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                            <TextBlock x:Name="LblViewHeader" Text="Local Library" FontSize="26" FontWeight="Bold" Foreground="{StaticResource Ink}"
+                                       TextTrimming="CharacterEllipsis">
                                 <TextBlock.Effect>
                                     <DropShadowEffect Color="White" BlurRadius="6" ShadowDepth="0" Opacity="0.8"/>
                                 </TextBlock.Effect>
                             </TextBlock>
                             <TextBlock x:Name="LblViewCount" Text="" Foreground="{StaticResource InkSoft}" Margin="1,0,0,0"/>
                         </StackPanel>
-                        <TextBox x:Name="TxtLocalFilter" Grid.Column="1" Width="220" Height="34" Margin="24,0,0,0"
+                        <TextBox x:Name="TxtLocalFilter" Grid.Column="1" Width="180" Height="34" Margin="0,0,16,0"
                                  Style="{StaticResource GlassTextBox}" Tag="Filter this list..." FontSize="13"
                                  TextChanged="LocalFilter_TextChanged"/>
                         <StackPanel x:Name="HeaderActionPanel" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                     </Grid>
 
                     <!-- Track list -->
-                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ScrollViewer x:Name="TrackScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                  Background="Transparent" AllowDrop="True"
+                                  PreviewDragOver="TrackList_PreviewDragOver" DragOver="TrackList_DragOver" Drop="TrackList_Drop">
                         <ItemsControl x:Name="TrackListItems"/>
                     </ScrollViewer>
                 </Grid>
@@ -799,8 +864,27 @@
             </ContentControl>
         </Grid>
 
+        <!-- ================= DIALOG HOST (themed replacement for MessageBox / InputBox) ================= -->
+        <Grid x:Name="DialogHost" Visibility="Collapsed">
+            <Border Background="#8C062B4A"/>
+            <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Width="500" Margin="24">
+                <Border CornerRadius="22" Background="{StaticResource DialogBase}" Effect="{StaticResource SoftShadow}"/>
+                <ContentControl Style="{StaticResource GlassPanel}" Padding="28,24,28,22">
+                    <StackPanel>
+                        <TextBlock x:Name="DialogTitle" FontSize="22" FontWeight="Bold" Foreground="{StaticResource Ink}" TextTrimming="CharacterEllipsis"/>
+                        <ScrollViewer x:Name="DialogMessageScroll" MaxHeight="300" Margin="0,10,0,0"
+                                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <TextBlock x:Name="DialogMessage" TextWrapping="Wrap" FontSize="14" LineHeight="21" Foreground="{StaticResource InkSoft}"/>
+                        </ScrollViewer>
+                        <ContentControl x:Name="DialogExtra"/>
+                        <StackPanel x:Name="DialogButtons" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0"/>
+                    </StackPanel>
+                </ContentControl>
+            </Grid>
+        </Grid>
+
         <!-- ================= LOADING OVERLAY ================= -->
-        <Border x:Name="LoadingOverlay" Background="{StaticResource SkyBrush}" d:IsHidden="True">
+        <Border x:Name="LoadingOverlay" Background="{StaticResource SkyBrush}">
             <Grid ClipToBounds="True">
                 <Ellipse Width="260" Height="260" Fill="{StaticResource BubbleBrush}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="140,90,0,0"/>
                 <Ellipse Width="150" Height="150" Fill="{StaticResource BubbleBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,180,120"/>
