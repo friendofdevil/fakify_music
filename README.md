@@ -1,6 +1,9 @@
-# fakify
+# fakify music 
 
+fakify music is a free music player, it allows users to enjoy music with no purchase needed, and no ads. 
 
+fakify music has all the features a normal music player has, including queuing track, skipping songs, and shuffle play. 
+you can also easily import your own music and, import csv playlists to make switching from other platforms easy.
 
 
 
