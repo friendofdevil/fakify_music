@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -20,12 +20,12 @@ namespace FakeifyCSharp
 {
     public partial class MainWindow : Window
     {
-        // Storage Paths
-        private readonly string MUSIC_FOLDER = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "Fakeify");
-        private readonly string PLAYLISTS_FILE;
-        private readonly string LIBRARY_ORDER_FILE;
-        private readonly string QUEUE_FILE;
-        private readonly string TRACK_CACHE_FILE;   // remembers which downloaded file belongs to which "title|artist"
+        // Storage paths. The folder is configurable in Settings; the choice is remembered in AppData/Fakeify/settings.json
+        private string MUSIC_FOLDER = string.Empty;
+        private string PLAYLISTS_FILE = string.Empty;
+        private string LIBRARY_ORDER_FILE = string.Empty;
+        private string QUEUE_FILE = string.Empty;
+        private string TRACK_CACHE_FILE = string.Empty;   // remembers which downloaded file belongs to which "title|artist"
 
         // Icon glyphs (Segoe Fluent Icons / Segoe MDL2 Assets)
         private const string G_PLAY = "\uE768", G_PAUSE = "\uE769", G_ADD = "\uE710", G_DELETE = "\uE74D",
@@ -63,17 +63,21 @@ namespace FakeifyCSharp
         private string _currentView = "library";
         private string _localSearchQuery = "";
         private int _renderVersion = 0;           // lets a newer RenderView() cancel an older one that is still adding rows
+        private int _busyCount = 0;               // running downloads/imports (the saving directory can't change meanwhile)
+        private TaskCompletionSource<int>? _dialogTcs;   // the in-app dialog that is currently open
 
         public MainWindow()
         {
             InitializeComponent();
 
-            // Directory Setup
-            Directory.CreateDirectory(MUSIC_FOLDER);
-            PLAYLISTS_FILE = Path.Combine(MUSIC_FOLDER, "playlists.json");
-            LIBRARY_ORDER_FILE = Path.Combine(MUSIC_FOLDER, "library_order.json");
-            QUEUE_FILE = Path.Combine(MUSIC_FOLDER, "queue.json");
-            TRACK_CACHE_FILE = Path.Combine(MUSIC_FOLDER, "track_cache.json");
+            // Storage folder (configurable in Settings)
+            string folder = LoadMusicFolderSetting();
+            try { Directory.CreateDirectory(folder); }
+            catch { folder = DefaultMusicFolder(); Directory.CreateDirectory(folder); }
+            ApplyStoragePaths(folder);
+
+            // dropping a song on "Queue" in the sidebar queues it
+            MakeDropTarget(BtnQueueView, p => AddToQueue(p.FilePath, p.Title));
 
             // Audio Player Configuration
             _player.Volume = 0.7;
@@ -269,7 +273,7 @@ namespace FakeifyCSharp
         private void UpdateNowPlayingHighlight()
         {
             foreach (Border row in TrackListItems.Items.OfType<Border>())
-                if (row.DataContext is string path) row.Tag = IsCurrent(path) ? "playing" : null;
+                if (row.DataContext is DragPayload d) row.Tag = IsCurrent(d.FilePath) ? "playing" : null;
         }
 
         private void UpdatePlayPauseIcon() => BtnPlayPause.Content = _isPlaying ? G_PAUSE : G_PLAY;
@@ -360,10 +364,9 @@ namespace FakeifyCSharp
                 };
 
                 Button btnDel = MakeActionButton(G_DELETE, "Delete", "DangerButton");
-                btnDel.Click += (s, e) =>
+                btnDel.Click += async (s, e) =>
                 {
-                    if (MessageBox.Show($"Delete the playlist \"{plName}\"?\nThe songs stay in your library.", "Delete playlist",
-                                        MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+                    if (!await ConfirmAsync("Delete playlist", $"Delete \"{plName}\"?\nThe songs stay in your library.", "Delete", danger: true)) return;
                     _playlists.Remove(plName);
                     SaveData();
                     RenderSidebarPlaylists();
@@ -386,6 +389,7 @@ namespace FakeifyCSharp
                 }
             }
 
+            LblViewHeader.ToolTip = LblViewHeader.Text;
             LblViewCount.Text = filtering
                 ? $"{itemsToAdd.Count} of {totalCount}"
                 : $"{totalCount} song{(totalCount == 1 ? "" : "s")}";
@@ -410,7 +414,8 @@ namespace FakeifyCSharp
 
         private Border CreateTrackRow(int index, string title, string filepath, string context, string plName = "")
         {
-            var row = new Border { Style = (Style)FindResource("TrackRow"), DataContext = filepath };
+            var payload = new DragPayload { FilePath = filepath, Title = title, Context = context, PlaylistName = plName, Index = index };
+            var row = new Border { Style = (Style)FindResource("TrackRow"), DataContext = payload };
             row.Tag = IsCurrent(filepath) ? "playing" : null;
 
             var grid = new Grid { Margin = new Thickness(6, 4, 8, 4) };
@@ -469,35 +474,29 @@ namespace FakeifyCSharp
             actions.Children.Add(btnPlay);
             actions.Children.Add(btnQueue);
 
-            // Add To Playlist menu with instant save & UI refresh
+            // Add To Playlist menu (themed popup)
             Button btnAddToPl = MakeIconButton(G_FOLDER, "Add to playlist");
             btnAddToPl.Click += (s, e) =>
             {
-                ContextMenu cm = new ContextMenu { PlacementTarget = btnAddToPl, Placement = PlacementMode.Bottom };
+                var cm = new ContextMenu { Style = (Style)FindResource("AeroContextMenu"), PlacementTarget = btnAddToPl, Placement = PlacementMode.Bottom };
+
                 foreach (string pl in _playlists.Keys)
                 {
-                    MenuItem mi = new MenuItem { Header = pl };
-                    mi.Click += (ms, me) =>
-                    {
-                        if (!_playlists[pl].Any(t => t.FilePath == filepath))
-                        {
-                            _playlists[pl].Add(new Track { FilePath = filepath, Title = title });
-                            SaveData();
-                            SetStatus($"Added to {pl}");
-
-                            if (_currentView == $"playlist:{pl}")
-                            {
-                                RenderView();
-                            }
-                        }
-                        else
-                        {
-                            SetStatus($"Already in {pl}");
-                        }
-                    };
+                    var mi = new MenuItem { Header = MenuLabel(pl), Icon = MenuGlyph(G_NOTE), Style = (Style)FindResource("AeroMenuItem") };
+                    mi.Click += (ms, me) => AddTrackToPlaylist(pl, filepath, title);
                     cm.Items.Add(mi);
                 }
-                if (cm.Items.Count == 0) cm.Items.Add(new MenuItem { Header = "No playlists yet", IsEnabled = false });
+                if (_playlists.Count == 0)
+                    cm.Items.Add(new MenuItem { Header = MenuLabel("No playlists yet"), IsEnabled = false, Style = (Style)FindResource("AeroMenuItem") });
+
+                var miNew = new MenuItem { Header = MenuLabel("New playlist..."), Icon = MenuGlyph(G_ADD), Style = (Style)FindResource("AeroMenuItem") };
+                miNew.Click += async (ms, me) =>
+                {
+                    string? created = await PromptAndCreatePlaylistAsync();
+                    if (created != null) AddTrackToPlaylist(created, filepath, title);
+                };
+                cm.Items.Add(miNew);
+
                 btnAddToPl.ContextMenu = cm;
                 cm.IsOpen = true;
             };
@@ -549,6 +548,48 @@ namespace FakeifyCSharp
             // double-click anywhere on the row (not on a button) plays it
             row.MouseLeftButtonDown += (s, e) => { if (e.ClickCount == 2) PlayFile(filepath, title); };
 
+            // ---- drag & drop: drag a row to reorder, or drop it on a playlist / Queue in the sidebar ----
+            row.AllowDrop = true;
+            row.PreviewMouseLeftButtonDown += (s, e) =>
+            {
+                if (IsInsideButton(e.OriginalSource as DependencyObject, row)) { _dragRow = null; return; }
+                _dragStart = e.GetPosition(null);
+                _dragRow = row;
+            };
+            row.PreviewMouseLeftButtonUp += (s, e) => _dragRow = null;
+            row.MouseMove += (s, e) =>
+            {
+                if (e.LeftButton != MouseButtonState.Pressed || _dragRow != row) return;
+                Point pos = e.GetPosition(null);
+                if (Math.Abs(pos.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+                    Math.Abs(pos.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+                _dragRow = null;
+                row.Opacity = 0.5;
+                try { DragDrop.DoDragDrop(row, new DataObject(DragFormat, payload), DragDropEffects.Move | DragDropEffects.Copy); }
+                finally { row.Opacity = 1; }
+            };
+            row.DragOver += (s, e) =>
+            {
+                if (e.Data.GetData(DragFormat) is DragPayload src && IsFromCurrentView(src))
+                {
+                    ShowDropIndicator(row, e.GetPosition(row).Y > row.ActualHeight / 2);
+                    e.Effects = DragDropEffects.Move;
+                    e.Handled = true;
+                }
+            };
+            row.DragLeave += (s, e) => ClearDropIndicator(row);
+            row.Drop += (s, e) =>
+            {
+                ClearDropIndicator(row);
+                if (e.Data.GetData(DragFormat) is DragPayload src && IsFromCurrentView(src))
+                {
+                    bool below = e.GetPosition(row).Y > row.ActualHeight / 2;
+                    ReorderTrack(src, below ? payload.Index + 1 : payload.Index);
+                    e.Handled = true;
+                }
+            };
+
             return row;
         }
 
@@ -586,15 +627,29 @@ namespace FakeifyCSharp
         private void ShowQueue_Click(object? sender = null, RoutedEventArgs? e = null) { _currentView = "queue"; TxtLocalFilter.Text = ""; RenderView(); }
         private void LocalFilter_TextChanged(object? sender = null, TextChangedEventArgs? e = null) { _localSearchQuery = TxtLocalFilter.Text.ToLower(); RenderView(); }
 
-        private void CreatePlaylist_Click(object? sender = null, RoutedEventArgs? e = null)
+        private async void CreatePlaylist_Click(object? sender = null, RoutedEventArgs? e = null)
         {
-            string name = Microsoft.VisualBasic.Interaction.InputBox("Enter playlist name:", "New Playlist");
-            if (!string.IsNullOrWhiteSpace(name) && !_playlists.ContainsKey(name))
+            string? name = await PromptAndCreatePlaylistAsync();
+            if (name == null) return;
+
+            _currentView = $"playlist:{name}";
+            TxtLocalFilter.Text = "";
+            RenderView();
+        }
+
+        /// <summary>Asks for a name (themed dialog) and creates the playlist if it doesn't exist yet. Returns its name, or null if cancelled.</summary>
+        private async Task<string?> PromptAndCreatePlaylistAsync()
+        {
+            string? name = await PromptAsync("New playlist", "Give your playlist a name.", "Playlist name", "Create");
+            if (string.IsNullOrWhiteSpace(name)) return null;
+
+            if (!_playlists.ContainsKey(name))
             {
                 _playlists[name] = new List<Track>();
                 SaveData();
                 RenderSidebarPlaylists();
             }
+            return name;
         }
 
         private void RenderSidebarPlaylists()
@@ -614,6 +669,7 @@ namespace FakeifyCSharp
 
                 Button btn = new Button { Content = content, CommandParameter = $"playlist:{pl}", Style = (Style)FindResource("NavButton") };
                 btn.Click += (s, e) => { _currentView = $"playlist:{pl}"; TxtLocalFilter.Text = ""; RenderView(); };
+                MakeDropTarget(btn, p => AddTrackToPlaylist(pl, p.FilePath, p.Title));
                 PlaylistsPanel.Children.Add(btn);
             }
             UpdateNavHighlight();
@@ -621,28 +677,55 @@ namespace FakeifyCSharp
         #endregion
 
         #region Local Importing & FFmpeg Conversion
+        private static readonly HashSet<string> ImportExtensions = new(StringComparer.OrdinalIgnoreCase)
+            { ".mp3", ".mp4", ".m4a", ".mkv", ".wav", ".flac", ".ogg", ".webm", ".aac", ".mov" };
+
         private void ImportLocal_Click(object? sender = null, RoutedEventArgs? e = null)
         {
-            OpenFileDialog dlg = new OpenFileDialog { Multiselect = true, Filter = "Media Files|*.mp4;*.mp3;*.m4a;*.mkv|All Files|*.*" };
-            if (dlg.ShowDialog() == true)
+            OpenFileDialog dlg = new OpenFileDialog
             {
-                SetStatus("Importing files...");
-                Task.Run(() => ProcessImportedFiles(dlg.FileNames));
-            }
+                Multiselect = true,
+                Filter = "Media Files|*.mp4;*.mp3;*.m4a;*.mkv;*.wav;*.flac;*.ogg;*.webm;*.aac;*.mov|All Files|*.*"
+            };
+            if (dlg.ShowDialog() == true) StartImport(dlg.FileNames);
         }
 
-        private void ProcessImportedFiles(string[] files)
+        private void StartImport(string[] files)
         {
-            foreach (string file in files)
-            {
-                string baseName = Path.GetFileNameWithoutExtension(file);
-                string ext = Path.GetExtension(file).ToLower();
-                string dest = Path.Combine(MUSIC_FOLDER, $"{baseName}.mp3");
+            _busyCount++;
+            SetStatus($"Importing {files.Length} file{(files.Length == 1 ? "" : "s")}...");
+            string destFolder = MUSIC_FOLDER;
+            Task.Run(() => ProcessImportedFiles(files, destFolder));
+        }
 
-                if (ext == ".mp3") File.Copy(file, dest, true);
-                else ExtractAudio(file, dest);
+        private void ProcessImportedFiles(string[] files, string destFolder)
+        {
+            string? error = null;
+            try
+            {
+                foreach (string file in files)
+                {
+                    string baseName = Path.GetFileNameWithoutExtension(file);
+                    string ext = Path.GetExtension(file).ToLower();
+                    string dest = Path.Combine(destFolder, $"{baseName}.mp3");
+
+                    if (ext == ".mp3")
+                    {
+                        if (!string.Equals(Path.GetFullPath(file), Path.GetFullPath(dest), StringComparison.OrdinalIgnoreCase))
+                            File.Copy(file, dest, true);
+                    }
+                    else ExtractAudio(file, dest);
+                }
             }
-            Dispatcher.Invoke(() => { GetOrderedLibrarySongs(forceReload: true); SetStatus("Import complete!"); RenderView(); });
+            catch (Exception ex) { error = ex.Message; }
+
+            Dispatcher.Invoke(() =>
+            {
+                _busyCount--;
+                GetOrderedLibrarySongs(forceReload: true);
+                SetStatus(error == null ? "Import complete!" : $"Import stopped: {error}");
+                RenderView();
+            });
         }
 
         private void ScanAndConvertFolderMp4s()
@@ -732,11 +815,13 @@ namespace FakeifyCSharp
         private void DownloadTrack(string searchText, bool autoPlay = false, bool autoQueue = false)
         {
             SetStatus($"Downloading \"{searchText}\"...");
+            _busyCount++;
             Task.Run(() =>
             {
                 string? downloadedFile = DownloadTrackSync($"ytsearch1:{searchText}");
                 Dispatcher.Invoke(() =>
                 {
+                    _busyCount--;
                     if (downloadedFile != null)
                     {
                         GetOrderedLibrarySongs(forceReload: true);
@@ -829,6 +914,13 @@ namespace FakeifyCSharp
         /// _playlists / _songQueue / _libraryOrder are never touched from two threads at once.
         /// </summary>
         private async Task ProcessCsvPlaylistAsync(string filePath)
+        {
+            _busyCount++;
+            try { await ProcessCsvPlaylistCoreAsync(filePath); }
+            finally { _busyCount--; }
+        }
+
+        private async Task ProcessCsvPlaylistCoreAsync(string filePath)
         {
             string playlistName = Path.GetFileNameWithoutExtension(filePath);
 
@@ -925,8 +1017,8 @@ namespace FakeifyCSharp
             {
                 string failedList = string.Join("\n", failed.Take(15)) + (failed.Count > 15 ? $"\n...and {failed.Count - 15} more" : "");
                 string reason = string.IsNullOrEmpty(lastError) ? "" : $"\n\nLast error: {lastError}";
-                MessageBox.Show($"{failed.Count} track(s) could not be downloaded:\n\n{failedList}{reason}",
-                                "CSV import finished with errors", MessageBoxButton.OK, MessageBoxImage.Warning);
+                await ShowDialogAsync("Import finished with errors", $"{failed.Count} track(s) could not be downloaded:\n\n{failedList}{reason}",
+                                      null, ("OK", "AccentButton"));
             }
         }
 
@@ -1199,11 +1291,10 @@ namespace FakeifyCSharp
             else if (_currentView == "queue") RenderView();
         }
 
-        private void DeleteLocalFile(string filepath)
+        private async void DeleteLocalFile(string filepath)
         {
             string name = Path.GetFileNameWithoutExtension(filepath);
-            if (MessageBox.Show($"Permanently delete \"{name}\" from your library?\nThis removes the file from disk.", "Delete song",
-                                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            if (!await ConfirmAsync("Delete song", $"Permanently delete \"{name}\" from your library?\nThis removes the file from disk.", "Delete", danger: true)) return;
 
             try
             {
@@ -1277,6 +1368,458 @@ namespace FakeifyCSharp
         }
         #endregion
 
+        #region Settings, dialogs & saving directory
+        public class AppSettings { public string? MusicFolder { get; set; } }
+
+        private static readonly string SETTINGS_FILE =
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Fakeify", "settings.json");
+
+        private static string DefaultMusicFolder() =>
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "Fakeify");
+
+        private static string LoadMusicFolderSetting()
+        {
+            try
+            {
+                if (File.Exists(SETTINGS_FILE))
+                {
+                    var s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SETTINGS_FILE));
+                    if (!string.IsNullOrWhiteSpace(s?.MusicFolder)) return s!.MusicFolder!;
+                }
+            }
+            catch { }
+            return DefaultMusicFolder();
+        }
+
+        private void SaveSettings()
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(SETTINGS_FILE)!);
+                File.WriteAllText(SETTINGS_FILE, JsonSerializer.Serialize(new AppSettings { MusicFolder = MUSIC_FOLDER }));
+            }
+            catch { }
+        }
+
+        private void ApplyStoragePaths(string folder)
+        {
+            MUSIC_FOLDER = folder;
+            PLAYLISTS_FILE = Path.Combine(folder, "playlists.json");
+            LIBRARY_ORDER_FILE = Path.Combine(folder, "library_order.json");
+            QUEUE_FILE = Path.Combine(folder, "queue.json");
+            TRACK_CACHE_FILE = Path.Combine(folder, "track_cache.json");
+        }
+
+        // ---------- in-app dialogs (themed replacement for the standard Windows message/input boxes) ----------
+
+        /// <summary>
+        /// Shows the glass dialog. Buttons are shown left to right; the last one is the default (Enter), Esc cancels.
+        /// Returns the index of the clicked button, or -1 if the dialog was cancelled/closed.
+        /// </summary>
+        private Task<int> ShowDialogAsync(string title, string message, UIElement? extra = null, params (string Text, string StyleKey)[] buttons)
+        {
+            _dialogTcs?.TrySetResult(-1);
+            var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _dialogTcs = tcs;
+
+            DialogTitle.Text = title;
+            DialogMessage.Text = message;
+            DialogMessageScroll.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
+            DialogExtra.Content = extra;
+            DialogExtra.Visibility = extra == null ? Visibility.Collapsed : Visibility.Visible;
+
+            DialogButtons.Children.Clear();
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                int result = i;
+                var b = new Button
+                {
+                    Content = buttons[i].Text,
+                    Style = (Style)FindResource(buttons[i].StyleKey),
+                    Height = 36,
+                    MinWidth = 100,
+                    Margin = new Thickness(10, 0, 0, 0),
+                    IsDefault = i == buttons.Length - 1
+                };
+                b.Click += (s, e) => CloseDialog(result);
+                DialogButtons.Children.Add(b);
+            }
+            DialogButtons.Visibility = buttons.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+
+            DialogHost.Visibility = Visibility.Visible;
+            DialogHost.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160)));
+
+            if (extra is TextBox tb && !tb.IsReadOnly)
+                Dispatcher.BeginInvoke(new Action(() => { tb.Focus(); tb.SelectAll(); }), DispatcherPriority.Loaded);
+
+            return tcs.Task;
+        }
+
+        private void CloseDialog(int result)
+        {
+            var tcs = _dialogTcs;
+            _dialogTcs = null;
+            DialogHost.Visibility = Visibility.Collapsed;
+            DialogExtra.Content = null;
+            tcs?.TrySetResult(result);
+        }
+
+        private async Task<bool> ConfirmAsync(string title, string message, string okText, bool danger = false)
+            => await ShowDialogAsync(title, message, null, ("Cancel", "GlassButton"), (okText, danger ? "DangerButton" : "AccentButton")) == 1;
+
+        private async Task<string?> PromptAsync(string title, string message, string placeholder, string okText)
+        {
+            var tb = new TextBox { Style = (Style)FindResource("GlassTextBox"), Tag = placeholder, Margin = new Thickness(0, 16, 0, 0) };
+            int r = await ShowDialogAsync(title, message, tb, ("Cancel", "GlassButton"), (okText, "AccentButton"));
+            return r == 1 ? tb.Text.Trim() : null;
+        }
+
+        private static FrameworkElement MenuGlyph(string glyph) =>
+            new TextBlock { Text = glyph, FontFamily = IconFont, FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+
+        private static FrameworkElement MenuLabel(string text) =>
+            new TextBlock { Text = text, MaxWidth = 260, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = text };
+
+        // ---------- settings ----------
+
+        private async void Settings_Click(object? sender = null, RoutedEventArgs? e = null)
+        {
+            while (true)
+            {
+                var pathBox = new TextBox
+                {
+                    Style = (Style)FindResource("GlassTextBox"),
+                    Text = MUSIC_FOLDER,
+                    IsReadOnly = true,
+                    Margin = new Thickness(0, 16, 0, 0)
+                };
+                int r = await ShowDialogAsync("Settings",
+                    "Saving directory\nYour songs, playlists and queue are stored in this folder.",
+                    pathBox, ("Open folder", "GlassButton"), ("Change folder...", "GlassButton"), ("Done", "AccentButton"));
+
+                if (r == 0)
+                {
+                    try { Process.Start(new ProcessStartInfo { FileName = MUSIC_FOLDER, UseShellExecute = true }); } catch { }
+                }
+                else if (r == 1) await ChangeSaveFolderFlowAsync();
+                else break;
+            }
+        }
+
+        private string? PickFolder(string initialDirectory)
+        {
+#if NET8_0_OR_GREATER
+            var dlg = new OpenFolderDialog { Title = "Choose where Fakeify saves your music", InitialDirectory = initialDirectory };
+            return dlg.ShowDialog(this) == true ? dlg.FolderName : null;
+#else
+            // Older .NET has no folder picker in WPF: use the file dialog, then take the folder it is showing
+            var dlg = new OpenFileDialog
+            {
+                Title = "Open the folder you want, then press Open",
+                ValidateNames = false,
+                CheckFileExists = false,
+                CheckPathExists = true,
+                FileName = "Select this folder",
+                InitialDirectory = initialDirectory
+            };
+            if (dlg.ShowDialog(this) != true) return null;
+            if (Directory.Exists(dlg.FileName)) return dlg.FileName;
+            string? dir = Path.GetDirectoryName(dlg.FileName);
+            return string.IsNullOrEmpty(dir) ? null : dir;
+#endif
+        }
+
+        private async Task ChangeSaveFolderFlowAsync()
+        {
+            if (_busyCount > 0)
+            {
+                await ShowDialogAsync("Please wait", "A download or import is still running. Try again once it has finished.", null, ("OK", "AccentButton"));
+                return;
+            }
+
+            string? picked = PickFolder(MUSIC_FOLDER);
+            if (string.IsNullOrWhiteSpace(picked)) return;
+
+            string newFolder;
+            try { newFolder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(picked)); }
+            catch { return; }
+
+            if (string.Equals(newFolder, Path.TrimEndingDirectorySeparator(Path.GetFullPath(MUSIC_FOLDER)), StringComparison.OrdinalIgnoreCase))
+                return;
+
+            int choice = await ShowDialogAsync("Change saving directory",
+                $"New folder:\n{newFolder}\n\n" +
+                "Move everything: your songs, playlists and queue are moved to the new folder.\n\n" +
+                "Just switch: your current files stay where they are, and Fakeify uses whatever is in the new folder.",
+                null, ("Cancel", "GlassButton"), ("Just switch", "GlassButton"), ("Move everything", "AccentButton"));
+            if (choice < 1) return;
+
+            await ApplySaveFolderAsync(newFolder, move: choice == 2);
+        }
+
+        private async Task ApplySaveFolderAsync(string newFolder, bool move)
+        {
+            string oldFolder = MUSIC_FOLDER;
+            try { Directory.CreateDirectory(newFolder); }
+            catch (Exception ex)
+            {
+                await ShowDialogAsync("Couldn't change folder", $"That folder can't be used:\n{ex.Message}", null, ("OK", "AccentButton"));
+                return;
+            }
+
+            // release the file the player may be holding and forget playback state tied to the old folder
+            StopAudio_Click();
+            _player.Close();
+            _currentTrack = null;
+            _history.Clear();
+            LblNowPlaying.Text = "Nothing playing";
+            LblTotalTime.Text = "00:00";
+
+            int skipped = 0, failed = 0;
+            if (move)
+            {
+                _busyCount++;
+                _ = ShowDialogAsync("Moving your library", "Please keep Fakeify open while your songs are moved...", null);
+                try { (skipped, failed) = await Task.Run(() => MoveMp3Files(oldFolder, newFolder)); }
+                finally { _busyCount--; CloseDialog(-1); }
+            }
+
+            ApplyStoragePaths(newFolder);
+            SaveSettings();
+
+            if (move)
+            {
+                // point playlists and the queue at the new location
+                string oldNorm = Path.TrimEndingDirectorySeparator(oldFolder);
+                string Remap(string path) =>
+                    string.Equals(Path.GetDirectoryName(path), oldNorm, StringComparison.OrdinalIgnoreCase)
+                        ? Path.Combine(newFolder, Path.GetFileName(path))
+                        : path;
+
+                foreach (var list in _playlists.Values) foreach (var t in list) t.FilePath = Remap(t.FilePath);
+                foreach (var t in _songQueue) t.FilePath = Remap(t.FilePath);
+
+                // our data files are rewritten in the new folder below; remove the stale copies in the old one
+                foreach (string f in new[] { "playlists.json", "library_order.json", "queue.json", "track_cache.json" })
+                {
+                    try { File.Delete(Path.Combine(oldFolder, f)); } catch { }
+                }
+                _cachedLibrary = null;
+                SaveTrackCache();
+            }
+            else
+            {
+                _playlists = new(); _libraryOrder = new(); _songQueue = new(); _trackCache = new(); _cachedLibrary = null;
+                LoadData();   // whatever already lives in the new folder
+            }
+
+            await Task.Run(() => ScanAndConvertFolderMp4s());   // convert stray .mp4 files found in the new folder
+            GetOrderedLibrarySongs(forceReload: true);
+            ValidateData();
+            RenderSidebarPlaylists();
+            ShowLocalLibrary_Click();
+            UpdateQueueUi();
+            SetStatus(move ? "Library moved to the new folder." : "Now saving to the new folder.");
+
+            if (move && skipped + failed > 0)
+            {
+                await ShowDialogAsync("Library moved",
+                    $"Your library now lives in:\n{newFolder}\n\n{skipped} song(s) already existed there and were left in the old folder, and {failed} could not be moved.",
+                    null, ("OK", "AccentButton"));
+            }
+        }
+
+        private static (int Skipped, int Failed) MoveMp3Files(string from, string to)
+        {
+            int skipped = 0, failed = 0;
+            if (!Directory.Exists(from)) return (0, 0);
+
+            foreach (string src in Directory.GetFiles(from, "*.mp3"))
+            {
+                string dst = Path.Combine(to, Path.GetFileName(src));
+                try
+                {
+                    if (File.Exists(dst)) skipped++;   // never overwrite something that is already there
+                    else File.Move(src, dst);
+                }
+                catch { failed++; }
+            }
+            return (skipped, failed);
+        }
+        #endregion
+
+        #region Drag & drop
+        private sealed class DragPayload
+        {
+            public string FilePath { get; set; } = "";
+            public string Title { get; set; } = "";
+            public string Context { get; set; } = "";        // library / queue / playlist
+            public string PlaylistName { get; set; } = "";
+            public int Index { get; set; }                   // position in the underlying (unfiltered) list
+        }
+
+        private const string DragFormat = "FakeifyTrack";
+        private Point _dragStart;
+        private Border? _dragRow;
+
+        /// <summary>True when the mouse went down on a button inside the row (those must not start a drag).</summary>
+        private static bool IsInsideButton(DependencyObject? d, DependencyObject stopAt)
+        {
+            while (d != null && d != stopAt)
+            {
+                if (d is ButtonBase) return true;
+                d = d is Visual || d is System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d);
+            }
+            return false;
+        }
+
+        private bool IsFromCurrentView(DragPayload p) =>
+            _currentView == "library" ? p.Context == "library"
+            : _currentView == "queue" ? p.Context == "queue"
+            : p.Context == "playlist" && _currentView == $"playlist:{p.PlaylistName}";
+
+        private void ShowDropIndicator(Border row, bool below)
+        {
+            row.BorderBrush = Res("ToggleOn");
+            row.BorderThickness = below ? new Thickness(1, 1, 1, 4) : new Thickness(1, 4, 1, 1);
+        }
+
+        private static void ClearDropIndicator(Border row)
+        {
+            row.ClearValue(Border.BorderBrushProperty);
+            row.ClearValue(Border.BorderThicknessProperty);
+        }
+
+        private static void MoveItem<T>(List<T> list, int from, int insertPos)
+        {
+            if (from < 0 || from >= list.Count) return;
+            insertPos = Math.Clamp(insertPos, 0, list.Count);
+            T item = list[from];
+            list.RemoveAt(from);
+            if (from < insertPos) insertPos--;
+            list.Insert(insertPos, item);
+        }
+
+        /// <summary>Moves the dragged song so it ends up at insertion position <paramref name="insertPos"/> of the list it came from.</summary>
+        private void ReorderTrack(DragPayload src, int insertPos)
+        {
+            switch (src.Context)
+            {
+                case "playlist":
+                    if (!_playlists.TryGetValue(src.PlaylistName, out var pl)) return;
+                    MoveItem(pl, src.Index, insertPos);
+                    break;
+                case "queue":
+                    MoveItem(_songQueue, src.Index, insertPos);
+                    break;
+                case "library":
+                    MoveItem(_libraryOrder, src.Index, insertPos);
+                    _cachedLibrary = new List<string>(_libraryOrder);
+                    break;
+                default:
+                    return;
+            }
+            SaveData();
+            RenderView();
+        }
+
+        private void AddTrackToPlaylist(string playlist, string filepath, string title)
+        {
+            if (!_playlists.TryGetValue(playlist, out var list)) return;
+
+            if (list.Any(t => string.Equals(t.FilePath, filepath, StringComparison.OrdinalIgnoreCase)))
+            {
+                SetStatus($"Already in {playlist}");
+                return;
+            }
+
+            list.Add(new Track { FilePath = filepath, Title = title });
+            SaveData();
+            SetStatus($"Added to {playlist}");
+            if (_currentView == $"playlist:{playlist}") RenderView();
+        }
+
+        /// <summary>Makes a sidebar button accept dragged songs (it glows green while a song hovers over it).</summary>
+        private void MakeDropTarget(Button target, Action<DragPayload> onDrop)
+        {
+            target.AllowDrop = true;
+
+            void Over(object? s, DragEventArgs e)
+            {
+                if (e.Data.GetData(DragFormat) is DragPayload)
+                {
+                    target.Tag = "drop";
+                    e.Effects = DragDropEffects.Copy;
+                    e.Handled = true;
+                }
+            }
+
+            target.DragEnter += Over;
+            target.DragOver += Over;
+            target.DragLeave += (s, e) => UpdateNavHighlight();
+            target.Drop += (s, e) =>
+            {
+                UpdateNavHighlight();
+                if (e.Data.GetData(DragFormat) is DragPayload p)
+                {
+                    onDrop(p);
+                    e.Handled = true;
+                }
+            };
+        }
+
+        // scroll the list while dragging near its top/bottom edge
+        private void TrackList_PreviewDragOver(object? sender, DragEventArgs e)
+        {
+            if (!e.Data.GetDataPresent(DragFormat)) return;
+            double y = e.GetPosition(TrackScroll).Y;
+            if (y < 40) TrackScroll.ScrollToVerticalOffset(TrackScroll.VerticalOffset - 18);
+            else if (y > TrackScroll.ActualHeight - 40) TrackScroll.ScrollToVerticalOffset(TrackScroll.VerticalOffset + 18);
+        }
+
+        // dropping on the empty space under the rows moves the song to the end
+        private void TrackList_DragOver(object? sender, DragEventArgs e)
+        {
+            if (e.Data.GetData(DragFormat) is DragPayload src && IsFromCurrentView(src))
+            {
+                e.Effects = DragDropEffects.Move;
+                e.Handled = true;
+            }
+        }
+
+        private void TrackList_Drop(object? sender, DragEventArgs e)
+        {
+            if (e.Data.GetData(DragFormat) is DragPayload src && IsFromCurrentView(src))
+            {
+                ReorderTrack(src, int.MaxValue);
+                e.Handled = true;
+            }
+        }
+
+        // dragging audio/video files from Windows Explorer into the window imports them
+        private void Window_DragOver(object? sender, DragEventArgs e)
+        {
+            e.Effects = DialogHost.Visibility != Visibility.Visible && e.Data.GetDataPresent(DataFormats.FileDrop)
+                ? DragDropEffects.Copy
+                : DragDropEffects.None;
+            e.Handled = true;
+        }
+
+        private void Window_Drop(object? sender, DragEventArgs e)
+        {
+            if (DialogHost.Visibility == Visibility.Visible) return;
+            if (e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
+
+            string[] media = files.Where(f => ImportExtensions.Contains(Path.GetExtension(f))).ToArray();
+            if (media.Length == 0)
+            {
+                SetStatus("Those aren't audio or video files Fakeify can import.");
+                return;
+            }
+            StartImport(media);
+        }
+        #endregion
+
         #region Slider, Volume & Keyboard
         private void Slider_DragStarted(object? sender = null, DragStartedEventArgs? e = null) => _isDraggingSlider = true;
 
@@ -1316,6 +1859,13 @@ namespace FakeifyCSharp
         // Space = play/pause, M = mute, Ctrl+Left/Right = previous/next (ignored while typing in a text box)
         private void Window_PreviewKeyDown(object? sender, KeyEventArgs e)
         {
+            // while a dialog is open: Esc cancels, nothing else triggers player shortcuts
+            if (DialogHost.Visibility == Visibility.Visible)
+            {
+                if (e.Key == Key.Escape && DialogButtons.Children.Count > 0) { CloseDialog(-1); e.Handled = true; }
+                return;
+            }
+
             if (Keyboard.FocusedElement is TextBox) return;
 
             if (e.Key == Key.Space) { TogglePlayPause_Click(); e.Handled = true; }
